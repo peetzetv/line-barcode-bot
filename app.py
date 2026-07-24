@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import base64
 import tempfile
+import threading
 import requests
 from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
@@ -112,28 +113,31 @@ def callback():
     print(f'Events received: {len(events)}')
 
     for event in events:
-        print(f'Event type: {event["type"]}')
-        if event['type'] == 'message':
-            print(f'Message type: {event["message"]["type"]}')
         if event['type'] == 'message' and event['message']['type'] == 'image':
-            reply_token = event['replyToken']
             message_id = event['message']['id']
-
-            reply_message(reply_token, 'กำลังประมวลผล...')
-
-            image_path = download_image(message_id)
-            results = decode_barcode(image_path)
-
-            print(f'Decode results: {results}')
-
-            if results:
-                result_text = '\n'.join([f"{r['data']}" for r in results])
-            else:
-                result_text = 'ไม่พบรหัส Barcode หรือ QR Code ในรูป'
-
-            push_message(DESTINATION_USER_ID, result_text)
+            reply_token = event['replyToken']
+            t = threading.Thread(target=process_image, args=(message_id, reply_token))
+            t.start()
 
     return 'OK'
+
+
+def process_image(message_id, reply_token):
+    try:
+        reply_message(reply_token, 'กำลังประมวลผล...')
+        image_path = download_image(message_id)
+        results = decode_barcode(image_path)
+
+        print(f'Decode results: {results}')
+
+        if results:
+            result_text = '\n'.join([f"{r['data']}" for r in results])
+        else:
+            result_text = 'ไม่พบรหัส Barcode หรือ QR Code ในรูป'
+
+        push_message(DESTINATION_USER_ID, result_text)
+    except Exception as e:
+        print(f'Error: {e}')
 
 
 @app.route("/", methods=['GET'])
