@@ -46,24 +46,23 @@ def download_image(message_id):
 def decode_barcode(image_path):
     img = Image.open(image_path)
     print(f'Image size: {img.size}')
-    barcode_results = []
-    ocr_results = []
+    results = []
 
     decoded_objects = pyzbar_decode(img)
     print(f'pyzbar original: {len(decoded_objects)} objects')
     for obj in decoded_objects:
         print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-        barcode_results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+        results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
 
-    if not barcode_results:
+    if not results:
         gray = img.convert('L')
         decoded_objects = pyzbar_decode(gray)
         print(f'pyzbar grayscale: {len(decoded_objects)} objects')
         for obj in decoded_objects:
             print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-            barcode_results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+            results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
 
-    if not barcode_results:
+    if not results:
         for thresh in [100, 128, 160, 200]:
             gray = img.convert('L')
             threshold = gray.point(lambda p, t=thresh: 255 if p > t else 0)
@@ -72,10 +71,10 @@ def decode_barcode(image_path):
                 print(f'pyzbar threshold {thresh}: {len(decoded_objects)} objects')
                 for obj in decoded_objects:
                     print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-                    barcode_results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
                 break
 
-    if not barcode_results:
+    if not results:
         for scale in [2, 3]:
             gray = img.convert('L')
             resized = gray.resize((gray.width * scale, gray.height * scale), Image.LANCZOS)
@@ -84,10 +83,10 @@ def decode_barcode(image_path):
                 print(f'pyzbar scale {scale}x: {len(decoded_objects)} objects')
                 for obj in decoded_objects:
                     print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-                    barcode_results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
                 break
 
-    if not barcode_results:
+    if not results:
         for angle in [90, 180, 270]:
             rotated = img.rotate(angle, expand=True)
             decoded_objects = pyzbar_decode(rotated)
@@ -95,10 +94,13 @@ def decode_barcode(image_path):
                 print(f'pyzbar rotate {angle}: {len(decoded_objects)} objects')
                 for obj in decoded_objects:
                     print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-                    barcode_results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
                 break
 
-    print('Trying OCR...')
+    if results:
+        return [results[0]]
+
+    print('No barcode found, trying OCR...')
     try:
         gray = img.convert('L')
         w, h = gray.size
@@ -116,15 +118,18 @@ def decode_barcode(image_path):
 
                     match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', clean)
                     if match:
-                        ocr_results.append({'data': match.group(0), 'type': 'OCR'})
+                        print(f'OCR EMS: {match.group(0)}')
+                        return [{'data': match.group(0), 'type': 'OCR'}]
 
                     match = re.search(r'[A-Z]{1,4}\d{8,15}', clean)
                     if match:
-                        ocr_results.append({'data': match.group(0), 'type': 'OCR'})
+                        print(f'OCR tracking: {match.group(0)}')
+                        return [{'data': match.group(0), 'type': 'OCR'}]
 
                     match = re.search(r'\d{12,20}', clean)
                     if match:
-                        ocr_results.append({'data': match.group(0), 'type': 'OCR'})
+                        print(f'OCR number: {match.group(0)}')
+                        return [{'data': match.group(0), 'type': 'OCR'}]
 
                 except Exception as e:
                     print(f'OCR error: {e}')
@@ -132,7 +137,7 @@ def decode_barcode(image_path):
     except Exception as e:
         print(f'OCR error: {e}')
 
-    return {'barcode': barcode_results, 'ocr': ocr_results}
+    return results
 
 
 def reply_message(token, text):
@@ -190,32 +195,10 @@ def process_image(message_id, reply_token):
 
         print(f'Decode results: {results}')
 
-        barcode_list = results['barcode']
-        ocr_list = results['ocr']
-
-        seen = set()
-        unique_ocr = []
-        for r in ocr_list:
-            if r['data'] not in seen:
-                seen.add(r['data'])
-                unique_ocr.append(r)
-
-        lines = []
-
-        if barcode_list:
-            lines.append('Barcode/QR:')
-            for r in barcode_list:
-                lines.append(f'  {r["data"]}')
-
-        if unique_ocr:
-            lines.append('OCR (อาจผิด):')
-            for r in unique_ocr:
-                lines.append(f'  {r["data"]}')
-
-        if not lines:
-            result_text = 'ไม่พบรหัส Barcode หรือ QR Code ในรูป'
+        if results:
+            result_text = results[0]['data']
         else:
-            result_text = '\n'.join(lines)
+            result_text = 'ไม่พบรหัส Barcode หรือ QR Code ในรูป'
 
         push_message(DESTINATION_USER_ID, result_text)
     except Exception as e:
