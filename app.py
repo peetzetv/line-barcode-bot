@@ -6,7 +6,7 @@ import base64
 import tempfile
 import threading
 import requests
-from PIL import Image
+from PIL import Image, ImageFilter
 from pyzbar.pyzbar import decode as pyzbar_decode
 import pytesseract
 from flask import Flask, request, abort, jsonify
@@ -102,37 +102,65 @@ def decode_barcode(image_path):
 
     print('No barcode found, trying OCR...')
     try:
+        w, h = img.size
         gray = img.convert('L')
-        w, h = gray.size
+
         if w < 800:
             scale = 800 // w + 1
             gray = gray.resize((w * scale, h * scale), Image.LANCZOS)
+            w, h = gray.size
 
-        for thresh_val in [100, 128, 160]:
-            threshold = gray.point(lambda p, t=thresh_val: 255 if p > t else 0)
-            for psm in [7, 8, 6]:
-                try:
-                    text = pytesseract.image_to_string(threshold, config=f'--psm {psm}')
-                    clean = re.sub(r'[^A-Za-z0-9]', '', text)
-                    print(f'OCR thresh={thresh_val} psm={psm}: [{clean}]')
+        regions = []
+        regions.append(gray.crop((0, 0, w, h // 4)))
+        regions.append(gray.crop((0, h // 4, w, h // 2)))
+        regions.append(gray.crop((0, h // 2, w, 3 * h // 4)))
+        regions.append(gray.crop((0, 3 * h // 4, w, h)))
+        regions.append(gray.crop((0, 0, w, h)))
 
-                    match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', clean)
-                    if match:
-                        print(f'OCR EMS: {match.group(0)}')
-                        return [{'data': match.group(0), 'type': 'OCR'}]
+        best_result = None
+        best_score = 0
 
-                    match = re.search(r'[A-Z]{1,4}\d{8,15}', clean)
-                    if match:
-                        print(f'OCR tracking: {match.group(0)}')
-                        return [{'data': match.group(0), 'type': 'OCR'}]
+        for region in regions:
+            for thresh_val in [100, 128, 160, 200]:
+                threshold = region.point(lambda p, t=thresh_val: 255 if p > t else 0)
 
-                    match = re.search(r'\d{12,20}', clean)
-                    if match:
-                        print(f'OCR number: {match.group(0)}')
-                        return [{'data': match.group(0), 'type': 'OCR'}]
+                sharp = threshold.filter(ImageFilter.SHARPEN)
 
-                except Exception as e:
-                    print(f'OCR error: {e}')
+                for psm in [7, 8, 13]:
+                    try:
+                        text = pytesseract.image_to_string(sharp, config=f'--psm {psm}')
+                        clean = re.sub(r'[^A-Za-z0-9]', '', text)
+                        if not clean or len(clean) < 8:
+                            continue
+                        print(f'OCR region thresh={thresh_val} psm={psm}: [{clean}]')
+
+                        match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', clean)
+                        if match:
+                            print(f'OCR EMS: {match.group(0)}')
+                            return [{'data': match.group(0), 'type': 'OCR'}]
+
+                        match = re.search(r'[A-Z]{2,4}\d{10,15}', clean)
+                        if match:
+                            score = len(match.group(0))
+                            if score > best_score:
+                                best_score = score
+                                best_result = match.group(0)
+                                print(f'OCR tracking candidate: {best_result}')
+
+                        match = re.search(r'\d{12,20}', clean)
+                        if match:
+                            score = len(match.group(0))
+                            if score > best_score:
+                                best_score = score
+                                best_result = match.group(0)
+                                print(f'OCR number candidate: {best_result}')
+
+                    except Exception as e:
+                        print(f'OCR error: {e}')
+
+        if best_result:
+            print(f'OCR best: {best_result}')
+            return [{'data': best_result, 'type': 'OCR'}]
 
     except Exception as e:
         print(f'OCR error: {e}')
