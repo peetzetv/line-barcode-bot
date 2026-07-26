@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import hmac
 import base64
@@ -7,6 +8,7 @@ import threading
 import requests
 from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
+import pytesseract
 from flask import Flask, request, abort, jsonify
 
 app = Flask(__name__)
@@ -97,6 +99,31 @@ def decode_barcode(image_path):
 
     if results:
         return [results[0]]
+
+    print('No barcode found, trying OCR...')
+    try:
+        gray = img.convert('L')
+        resized = gray.resize((gray.width * 2, gray.height * 2), Image.LANCZOS)
+        text = pytesseract.image_to_string(resized, config='--psm 6')
+        print(f'OCR raw text: {text}')
+        text = text.strip().replace(' ', '').replace('\n', '')
+        patterns = [
+            r'[A-Z]{2}\d{9}[A-Z]{2}',
+            r'\d{10,15}',
+            r'[A-Z0-9]{10,30}',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                result = match.group(0)
+                print(f'OCR found tracking: {result}')
+                return [{'data': result, 'type': 'OCR'}]
+
+        if text:
+            print(f'OCR found text: {text}')
+            return [{'data': text, 'type': 'OCR'}]
+    except Exception as e:
+        print(f'OCR error: {e}')
 
     return results
 
