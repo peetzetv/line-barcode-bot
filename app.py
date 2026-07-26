@@ -103,25 +103,46 @@ def decode_barcode(image_path):
     print('No barcode found, trying OCR...')
     try:
         gray = img.convert('L')
-        resized = gray.resize((gray.width * 2, gray.height * 2), Image.LANCZOS)
-        text = pytesseract.image_to_string(resized, config='--psm 6')
-        print(f'OCR raw text: {text}')
-        text = text.strip().replace(' ', '').replace('\n', '')
-        patterns = [
-            r'[A-Z]{2}\d{9}[A-Z]{2}',
-            r'\d{10,15}',
-            r'[A-Z0-9]{10,30}',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                result = match.group(0)
-                print(f'OCR found tracking: {result}')
-                return [{'data': result, 'type': 'OCR'}]
+        w, h = gray.size
+        if w < 500:
+            scale = 500 // w + 1
+            gray = gray.resize((w * scale, h * scale), Image.LANCZOS)
 
-        if text:
-            print(f'OCR found text: {text}')
-            return [{'data': text, 'type': 'OCR'}]
+        results_ocr = []
+
+        for psm in [7, 8, 13, 6]:
+            try:
+                text = pytesseract.image_to_string(gray, config=f'--psm {psm} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+                print(f'OCR psm {psm}: [{text.strip()}]')
+                clean = re.sub(r'[^A-Za-z0-9]', '', text)
+                if clean:
+                    results_ocr.append(clean)
+            except Exception as e:
+                print(f'OCR psm {psm} error: {e}')
+
+        for raw in results_ocr:
+            match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', raw)
+            if match:
+                print(f'OCR EMS: {match.group(0)}')
+                return [{'data': match.group(0), 'type': 'OCR'}]
+
+        for raw in results_ocr:
+            match = re.search(r'[A-Z]{1,4}\d{8,15}', raw)
+            if match:
+                print(f'OCR tracking: {match.group(0)}')
+                return [{'data': match.group(0), 'type': 'OCR'}]
+
+        for raw in results_ocr:
+            match = re.search(r'\d{10,20}', raw)
+            if match:
+                print(f'OCR number: {match.group(0)}')
+                return [{'data': match.group(0), 'type': 'OCR'}]
+
+        for raw in results_ocr:
+            if len(raw) >= 8:
+                print(f'OCR text: {raw}')
+                return [{'data': raw, 'type': 'OCR'}]
+
     except Exception as e:
         print(f'OCR error: {e}')
 
