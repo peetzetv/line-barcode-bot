@@ -61,13 +61,39 @@ def decode_barcode(image_path):
             results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
 
     if not results:
-        gray = img.convert('L')
-        threshold = gray.point(lambda p: 255 if p > 128 else 0)
-        decoded_objects = pyzbar_decode(threshold)
-        print(f'pyzbar threshold: {len(decoded_objects)} objects')
-        for obj in decoded_objects:
-            print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
-            results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+        for thresh in [100, 128, 160, 200]:
+            gray = img.convert('L')
+            threshold = gray.point(lambda p, t=thresh: 255 if p > t else 0)
+            decoded_objects = pyzbar_decode(threshold)
+            if decoded_objects:
+                print(f'pyzbar threshold {thresh}: {len(decoded_objects)} objects')
+                for obj in decoded_objects:
+                    print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                break
+
+    if not results:
+        for scale in [2, 3]:
+            gray = img.convert('L')
+            resized = gray.resize((gray.width * scale, gray.height * scale), Image.LANCZOS)
+            decoded_objects = pyzbar_decode(resized)
+            if decoded_objects:
+                print(f'pyzbar scale {scale}x: {len(decoded_objects)} objects')
+                for obj in decoded_objects:
+                    print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                break
+
+    if not results:
+        for angle in [90, 180, 270]:
+            rotated = img.rotate(angle, expand=True)
+            decoded_objects = pyzbar_decode(rotated)
+            if decoded_objects:
+                print(f'pyzbar rotate {angle}: {len(decoded_objects)} objects')
+                for obj in decoded_objects:
+                    print(f'  Type: {obj.type}, Data: {obj.data.decode("utf-8")}')
+                    results.append({'data': obj.data.decode('utf-8'), 'type': obj.type})
+                break
 
     if results:
         return [results[0]]
