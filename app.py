@@ -36,11 +36,11 @@ def download_image(message_id):
     ext = '.png'
     if 'jpeg' in content_type or 'jpg' in content_type:
         ext = '.jpg'
-    save_path = os.path.join(os.path.dirname(__file__), f'barcode_test{ext}')
-    with open(save_path, 'wb') as fd:
-        fd.write(resp.content)
-    print(f'Saved to: {save_path}')
-    return save_path
+    fd, path = tempfile.mkstemp(suffix=ext, dir='/tmp')
+    with os.fdopen(fd, 'wb') as f:
+        f.write(resp.content)
+    print(f'Saved to: {path}')
+    return path
 
 
 def decode_barcode(image_path):
@@ -104,44 +104,41 @@ def decode_barcode(image_path):
     try:
         gray = img.convert('L')
         w, h = gray.size
-        if w < 500:
-            scale = 500 // w + 1
+        if w < 800:
+            scale = 800 // w + 1
             gray = gray.resize((w * scale, h * scale), Image.LANCZOS)
 
-        results_ocr = []
+        best_tracking = None
 
-        for psm in [7, 8, 13, 6]:
-            try:
-                text = pytesseract.image_to_string(gray, config=f'--psm {psm} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
-                print(f'OCR psm {psm}: [{text.strip()}]')
-                clean = re.sub(r'[^A-Za-z0-9]', '', text)
-                if clean:
-                    results_ocr.append(clean)
-            except Exception as e:
-                print(f'OCR psm {psm} error: {e}')
+        for thresh_val in [100, 128, 160]:
+            threshold = gray.point(lambda p, t=thresh_val: 255 if p > t else 0)
+            for psm in [7, 8, 6]:
+                try:
+                    text = pytesseract.image_to_string(threshold, config=f'--psm {psm}')
+                    clean = re.sub(r'[^A-Za-z0-9]', '', text)
+                    print(f'OCR thresh={thresh_val} psm={psm}: [{clean}]')
 
-        for raw in results_ocr:
-            match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', raw)
-            if match:
-                print(f'OCR EMS: {match.group(0)}')
-                return [{'data': match.group(0), 'type': 'OCR'}]
+                    match = re.search(r'[A-Z]{2}\d{9}[A-Z]{2}', clean)
+                    if match:
+                        print(f'OCR EMS: {match.group(0)}')
+                        return [{'data': match.group(0), 'type': 'OCR'}]
 
-        for raw in results_ocr:
-            match = re.search(r'[A-Z]{1,4}\d{8,15}', raw)
-            if match:
-                print(f'OCR tracking: {match.group(0)}')
-                return [{'data': match.group(0), 'type': 'OCR'}]
+                    match = re.search(r'[A-Z]{1,4}\d{8,15}', clean)
+                    if match:
+                        print(f'OCR tracking: {match.group(0)}')
+                        return [{'data': match.group(0), 'type': 'OCR'}]
 
-        for raw in results_ocr:
-            match = re.search(r'\d{10,20}', raw)
-            if match:
-                print(f'OCR number: {match.group(0)}')
-                return [{'data': match.group(0), 'type': 'OCR'}]
+                    match = re.search(r'\d{12,20}', clean)
+                    if match:
+                        if not best_tracking or len(match.group(0)) > len(best_tracking):
+                            best_tracking = match.group(0)
 
-        for raw in results_ocr:
-            if len(raw) >= 8:
-                print(f'OCR text: {raw}')
-                return [{'data': raw, 'type': 'OCR'}]
+                except Exception as e:
+                    print(f'OCR error: {e}')
+
+        if best_tracking:
+            print(f'OCR number: {best_tracking}')
+            return [{'data': best_tracking, 'type': 'OCR'}]
 
     except Exception as e:
         print(f'OCR error: {e}')
