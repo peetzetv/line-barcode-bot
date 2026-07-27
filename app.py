@@ -3,6 +3,7 @@ import re
 import hashlib
 import hmac
 import base64
+import time
 import tempfile
 import threading
 import requests
@@ -213,6 +214,20 @@ def home():
     return 'Barcode Reader Bot is running!'
 
 
+PORT = int(os.environ.get('PORT', 8000))
+
+def keep_alive():
+    time.sleep(60)
+    while True:
+        try:
+            app_url = f'http://127.0.0.1:{PORT}'
+            requests.get(app_url, timeout=10)
+            print('Keep-alive ping sent')
+        except Exception as e:
+            print(f'Keep-alive error: {e}')
+        time.sleep(240)
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
+    threading.Thread(target=keep_alive, daemon=True).start()
+    app.run(host='0.0.0.0', port=PORT)
